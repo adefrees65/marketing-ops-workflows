@@ -1,0 +1,211 @@
+{
+  "name": "Lead Capture, Qualification and Routing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-capture",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "3f1a0001-0000-4000-8000-000000000001",
+      "name": "Lead Capture (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        300
+      ],
+      "webhookId": "3f1a0001-0000-4000-8000-000000000001"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ---------------------------------------------------------------------\n// NORMALIZE LEAD\n// Four capture sources feed this one workflow. Each sends a slightly\n// different payload shape. This node is the only place that knows about\n// those differences. Everything downstream sees one canonical schema.\n//\n// This is the \"one workflow, four entry points\" decision. The alternative\n// is four near-identical workflows that drift apart within a quarter.\n// ---------------------------------------------------------------------\n\nconst raw = $input.item.json.body ?? $input.item.json;\n\n// Source-specific field aliases. Adding a fifth capture source is a new\n// entry in this map, not a new workflow.\nconst SOURCE_MAP = {\n  inbound_hand_raiser:  { email: 'email',          company: 'company',          minutes: 'engagement_minutes' },\n  content_download:     { email: 'work_email',     company: 'company_name',     minutes: 'session_minutes' },\n  engagement_threshold: { email: 'email',          company: 'account_name',     minutes: 'total_minutes' },\n  event:                { email: 'attendee_email', company: 'attendee_company', minutes: 'booth_minutes' }\n};\n\nconst source = String(raw.lead_source || 'inbound_hand_raiser').toLowerCase();\nconst map = SOURCE_MAP[source] || SOURCE_MAP.inbound_hand_raiser;\n\nconst str = (v) => (typeof v === 'string' ? v.trim() : (v ?? null));\nconst num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);\n\nconst email = str(raw[map.email]);\n\nreturn {\n  json: {\n    // Identity. Email is the source of truth for dedupe and it is\n    // lowercased here, at capture, so nothing downstream has to guess.\n    email: email ? email.toLowerCase() : null,\n    company: str(raw[map.company]),\n\n    // Capture context\n    lead_source: source,\n    captured_at: raw.captured_at || new Date().toISOString(),\n\n    // Engagement signal\n    engagement_minutes: num(raw[map.minutes]),\n    conversion_event: str(raw.conversion_event),\n\n    // Firmographics used for routing\n    employee_count: num(raw.employee_count),\n    existing_account_owner: str(raw.existing_account_owner),\n\n    // Brand / product attribution, populated at capture from UTM params.\n    // Inferring brand later is how a shared multi-brand instance bleeds\n    // together. Set it once, at the form, or you never trust it again.\n    product: str(raw.product) || str(raw.utm_content),\n    utm_source: str(raw.utm_source),\n    utm_campaign: str(raw.utm_campaign)\n  }\n};\n"
+      },
+      "id": "3f1a0001-0000-4000-8000-000000000002",
+      "name": "Normalize Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ---------------------------------------------------------------------\n// SCORE & QUALIFY\n// One pure function. Given a normalized lead, decide two things:\n//   1. Is this an MQA?\n//   2. Who owns it?\n//\n// Deliberately no branching on the canvas. Canvas branches are where\n// this kind of workflow rots: each branch accumulates its own slightly\n// different logic until nobody can say what the rules are. Adding a\n// fourth segment here is one row in ROUTING_TABLE.\n// ---------------------------------------------------------------------\n\nconst lead = $input.item.json;\n\n// --- Definitions -----------------------------------------------------\n// These are the contract between marketing and sales. They live in code\n// and in the SOP, and they match. That is the whole point.\nconst MQA_MINUTES_THRESHOLD = 100;   // rolling 3-month window\nconst ENTERPRISE_HEADCOUNT  = 500;\n\nconst HIGH_VALUE_EVENTS = [\n  'demo_request',\n  'pricing_contact',\n  'trial_started'\n];\n\n// --- Qualification ---------------------------------------------------\nconst met_threshold = lead.engagement_minutes >= MQA_MINUTES_THRESHOLD;\nconst high_value    = HIGH_VALUE_EVENTS.includes(lead.conversion_event);\nconst is_mqa        = met_threshold || high_value;\n\n// Always record *why*. An MQA you cannot explain is an MQA sales will\n// argue with.\nconst qualification_reason = high_value\n  ? 'high_value_event:' + lead.conversion_event\n  : met_threshold\n    ? 'engagement_threshold:' + lead.engagement_minutes + 'min'\n    : 'below_threshold:' + lead.engagement_minutes + 'min';\n\n// --- Segment ---------------------------------------------------------\n// Order matters. An existing owner outranks firmographics every time --\n// routing a named account to a new BDR is the fastest way to lose the\n// sales team's trust in the whole system.\nconst segment = lead.existing_account_owner\n  ? 'existing_owner'\n  : lead.employee_count >= ENTERPRISE_HEADCOUNT\n    ? 'enterprise'\n    : 'mid_market';\n\n// --- Routing table ---------------------------------------------------\nconst ROUTING_TABLE = {\n  existing_owner: {\n    owner_role: 'account_owner',\n    slack_channel: '#leads-named-accounts',\n    salesloft_cadence: 'existing-account-reengage'\n  },\n  enterprise: {\n    owner_role: 'bdr',\n    slack_channel: '#leads-enterprise',\n    salesloft_cadence: 'enterprise-outbound-v3'\n  },\n  mid_market: {\n    owner_role: 'isr',\n    slack_channel: '#leads-mid-market',\n    salesloft_cadence: 'mid-market-inbound-v2'\n  }\n};\n\nreturn {\n  json: {\n    ...lead,\n    is_mqa,\n    qualification_reason,\n    segment,\n    lifecycle_stage: is_mqa ? 'Qualified' : 'Validated',\n    route: ROUTING_TABLE[segment]\n  }\n};\n"
+      },
+      "id": "3f1a0001-0000-4000-8000-000000000003",
+      "name": "Score & Qualify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9b2c0001-0000-4000-8000-00000000000a",
+              "leftValue": "={{ $json.is_mqa }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "3f1a0001-0000-4000-8000-000000000004",
+      "name": "Is MQA?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ---------------------------------------------------------------------\n// BUILD SALES HANDOFF\n// Constructs the payloads for Slack and SalesLoft. Nothing is actually\n// sent from here, on purpose: this repo is the decision layer, and the\n// decision layer is the part worth reviewing.\n//\n// To make it live, replace this node with two HTTP Request nodes and\n// point them at a Slack incoming webhook and the SalesLoft API.\n// ---------------------------------------------------------------------\n\nconst lead = $input.item.json;\nconst company = lead.company || 'unknown company';\n\nreturn {\n  json: {\n    decision: 'route_to_sales',\n    lifecycle_stage: lead.lifecycle_stage,\n    assign_to: lead.route.owner_role,\n\n    salesloft: {\n      cadence: lead.route.salesloft_cadence,\n      person: { email: lead.email, company: lead.company }\n    },\n\n    slack: {\n      channel: lead.route.slack_channel,\n      text: [\n        '*New MQA - ' + lead.segment.replace(/_/g, ' ') + '*',\n        lead.email + ' | ' + company,\n        'Source: ' + lead.lead_source + ' | Why: ' + lead.qualification_reason\n      ].join('\\n')\n    },\n\n    // Every decision writes an audit record. If you cannot reconstruct\n    // why a lead went where it went, you cannot debug the funnel.\n    audit: {\n      email: lead.email,\n      segment: lead.segment,\n      qualification_reason: lead.qualification_reason,\n      captured_at: lead.captured_at,\n      product: lead.product\n    }\n  }\n};\n"
+      },
+      "id": "3f1a0001-0000-4000-8000-000000000005",
+      "name": "Build Sales Handoff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ---------------------------------------------------------------------\n// ASSIGN NURTURE TRACK\n// Not an MQA yet. It still gets a home. Leads that fall out of routing\n// with no track assigned are how a database quietly rots -- they are not\n// lost, they are just invisible, which is worse.\n// ---------------------------------------------------------------------\n\nconst lead = $input.item.json;\n\nconst NURTURE_TRACKS = {\n  inbound_hand_raiser:  'hand-raiser-warmup',\n  content_download:     'content-topic-followup',\n  engagement_threshold: 'engagement-accelerate',\n  event:                'post-event-followup'\n};\n\nconst MQA_MINUTES_THRESHOLD = 100;\n\nreturn {\n  json: {\n    decision: 'route_to_nurture',\n    lifecycle_stage: lead.lifecycle_stage,\n    nurture_track: NURTURE_TRACKS[lead.lead_source] || 'general-nurture',\n\n    // Useful for reporting: how close was this lead to qualifying?\n    minutes_to_threshold: Math.max(0, MQA_MINUTES_THRESHOLD - lead.engagement_minutes),\n\n    audit: {\n      email: lead.email,\n      segment: lead.segment,\n      qualification_reason: lead.qualification_reason,\n      captured_at: lead.captured_at,\n      product: lead.product\n    }\n  }\n};\n"
+      },
+      "id": "3f1a0001-0000-4000-8000-000000000006",
+      "name": "Assign Nurture Track",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json, null, 2) }}",
+        "options": {}
+      },
+      "id": "3f1a0001-0000-4000-8000-000000000007",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        820,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Lead Capture (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lead": {
+      "main": [
+        [
+          {
+            "node": "Score & Qualify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score & Qualify": {
+      "main": [
+        [
+          {
+            "node": "Is MQA?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is MQA?": {
+      "main": [
+        [
+          {
+            "node": "Build Sales Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Assign Nurture Track",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Sales Handoff": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign Nurture Track": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "instanceId": "reference-implementation"
+  },
+  "tags": []
+}
