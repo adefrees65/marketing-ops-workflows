@@ -1,43 +1,117 @@
-# Lead Capture, Qualification and Routing
+# marketing-ops-workflows
 
-A reference implementation of a lead lifecycle in [n8n](https://n8n.io): one webhook in, a qualification decision out, with the routing rules written down instead of argued about.
+Two production-shaped n8n workflows: a lead capture/qualification/routing engine, and an AI content approval engine. Both are reference implementations of architectures I designed and ran in production, rebuilt here in n8n so the decisions are readable.
 
-The architecture here is one I designed and ran in production on a HubSpot / Slack / SalesLoft stack. This repo is that architecture rebuilt in n8n as a self-contained, runnable example — no credentials, no external calls, nothing to configure. Import it and it works.
+The interesting part isn't the tooling. It's where the logic lives, what the AI is allowed to decide, and what happens when something goes wrong.
 
-## The problem it models
+---
 
-Most lead flows fail the same way. Marketing builds a separate workflow per capture source, each one accumulates its own slightly different follow-up logic, and within two quarters nobody can answer the only question that matters: *what makes a lead qualified?* Sales stops trusting the routing, marketing stops trusting the reporting, and the argument that follows is never really about workflows. It's about definitions nobody owns.
-
-So this build starts from the definition and works outward.
+## What's here
 
 ```
-Webhook  ->  Normalize Lead  ->  Score & Qualify  ->  Is MQA?  ->  Build Sales Handoff  -> Respond
-                                                              \-> Assign Nurture Track -/
+workflows/
+  lead-capture-qualify-route.json        7 nodes  · lead lifecycle decision layer
+  brand-custodian-approval-engine.json  27 nodes · AI content approval, two flows
+prompts/
+  brand-custodian-system-prompt.md       the classifier's contract, versioned
+examples/
+  01-enterprise-demo-request.json        sample payloads for the lead flow
+  ...
 ```
 
-Seven nodes. Four capture sources. One set of rules.
+---
 
-## Architecture decisions
+## 1. Lead capture, qualification and routing
 
-**One workflow, four entry points.** Inbound hand raisers, content downloads, engagement thresholds and events all hit the same webhook. `Normalize Lead` is the only node that knows their payloads differ — it maps each source's field names into one canonical schema. Adding a fifth source is a new entry in `SOURCE_MAP`, not a new workflow to keep in sync.
+One webhook in, one decision out. Four capture sources — inbound hand-raiser, content download, engagement threshold, event scan — feed a single workflow.
 
-**The branching lives in code, not on the canvas.** There is exactly one visible branch, and it's the one that carries business meaning: qualified or not. Segment routing happens inside `Score & Qualify` as a lookup table. Canvas branches are where workflows rot — each one quietly grows its own version of the rules until the diagram no longer describes the system. A routing table is one screen you can read top to bottom, and adding a segment is a row.
+**Normalize → Score & Qualify → Is MQA? → handoff or nurture → Respond**
 
-**The MQA definition is a constant, not an opinion.** `MQA_MINUTES_THRESHOLD = 100` over a rolling three-month window, or any high-value conversion event. It sits at the top of the node, in caps, matching the SOP word for word. A threshold you can point at ends the argument. A threshold buried in a filter condition three clicks deep restarts it every quarter.
+### Design decisions worth arguing about
 
-**Every decision records why it was made.** `qualification_reason` is written on every lead, qualified or not — `high_value_event:demo_request`, `engagement_threshold:118min`, `below_threshold:20min`. An MQA you can't explain is an MQA sales will argue with, and a funnel you can't reconstruct is a funnel you can't debug.
+**Four entry points, one workflow.** The four sources send different payload shapes. A `SOURCE_MAP` in the Normalize node is the only place that knows about those differences; everything downstream sees one canonical schema. The alternative — four near-identical workflows — is what this replaced in production, where the branches were 95% identical and quietly drifting apart. Adding a fifth source is a new entry in a map, not a new workflow.
 
-**Existing ownership outranks firmographics.** In `Score & Qualify`, the segment check tests for a named account owner *before* it looks at headcount. Routing someone's named account to a new BDR is the fastest way to lose the sales team's trust in the entire system, and once that's gone the rules stop being followed regardless of what the SOP says.
+**Almost no branching on the canvas.** There's exactly one visual branch: MQA or not. Segmentation, ownership, cadence and channel all resolve through a `ROUTING_TABLE` lookup rather than nested IF nodes. Canvas branches are where this kind of workflow rots — each one accumulates its own slightly different logic until nobody can state the rules. A table can be read in one screen.
 
-**Brand attribution is set at capture, never inferred.** The `product` field is populated from UTM parameters on the way in. This one comes from running three brands out of a single shared portal: it isn't hard to put multiple brands in one instance, it's hard to stop them bleeding into each other. That comes down to picking the one field that carries brand identity and guaranteeing it's populated at the form — because anything you infer downstream, you stop trusting.
+**Order matters in segmentation.** An existing account owner outranks firmographics, always. Routing a named account to a new BDR is the fastest way to lose the sales team's trust in the whole system, and trust is the actual dependency — not the routing accuracy.
 
-**Leads that don't qualify still get a home.** The nurture branch assigns a track by source and calculates how many engagement minutes short the lead fell. Leads that fall out of routing with nothing assigned aren't lost, they're invisible, which is worse.
+**Every decision writes an audit record.** Including the qualification reason. An MQA you can't explain is an MQA sales will argue with.
 
-## Run it
+**One constant, one location.** The MQA threshold is declared once, next to the code that computes distance-from-threshold. Downstream nodes read the computed value instead of re-deriving it. An earlier version declared it twice; changing it upstream left the second copy silently reporting a stale number. No error, no crash — just quietly wrong data feeding reporting. That bug is why this file has the comment it has.
 
-1. Install n8n — `npx n8n` for a local instance at `http://localhost:5678`, or use n8n Cloud.
-2. In the editor: **Workflows → Import from File** → `workflows/lead-capture-qualify-route.json`.
-3. Click **Execute workflow** to arm the test webhook, then POST one of the examples:
+---
+
+## 2. Brand Custodian — AI content approval engine
+
+An LLM classifies submitted marketing assets against brand governance rules; the pipeline around it does everything else. Configured here for a creative/media production agency (video, photography, brand identity, event coverage).
+
+**Two flows on one canvas, deliberately.**
+
+*Intake (form trigger):* form → file staging → Claude classification → tiered Asana task → Airtable audit record → conditional Slack notification.
+
+*Approval (webhook trigger):* Asana webhook → stage read → record lookup → file move + shared link → audit record update.
+
+### Why two entry points and not one
+
+These are two different events in one lifecycle, separated by human time. Someone submits an asset; a reviewer acts on it twenty minutes or five days later. A single execution can't span that — you'd hold a run open for days waiting on a person, which dies the moment the instance restarts.
+
+So the intake flow ends at "task created, record logged," and state lives where it belongs: Asana owns the approval stage, Airtable owns the audit record. The webhook flow picks the thread back up by finding the record via the Asana task GID.
+
+Note the contrast with the lead flow, which consolidates *four* entry points into one. Same principle, opposite conclusion: **consolidate on the event, not on the tool.** Four sources of one event merge. Two different events stay separate.
+
+### What the AI decides, and what it doesn't
+
+The model returns strict JSON: tier, brand_pass, confidence, asset_type, industry, vector, summary, flags, rationale. Everything after that is deterministic.
+
+**Uncertainty escalates upward.** `auto < design < brand`. A false "needs review" costs minutes. A false "auto-approve" costs brand integrity. A submitter asserting their own asset is compliant does not lower the tier.
+
+**Two decisions, never conflated.** `brand_pass` answers *is there a defect the submitter must fix.* `tier` answers *who needs to review this.* Needing sign-off, usage rights or legal clearance is a routing reason, not a defect. (See the build log below — this one cost me a rewrite.)
+
+**Rejections are validated against a controlled vocabulary.** If the model sets `brand_pass: false`, it must cite at least one flag from a defined list of actual asset defects. If it can't, the code overrides the rejection, escalates the tier instead, and stamps `escalated_not_failed` so the override is visible. The model's *concern* is preserved; its *routing decision* is corrected.
+
+**Some rules are code, not prompt.** Co-branded content can never auto-approve. That's enforced after the model returns, not requested of it. Governance rules I'm unwilling to leave to a model's discretion live where they can't drift.
+
+**Parse failure fails safe.** Unparseable model output escalates to full human review, never to auto-approve.
+
+### Shadow mode
+
+The auto-approve tier ships disabled. The AI classifies and recommends from day one, but auto-approved assets still land at "Ready for Review" and post a confirmation request to the review channel. One config flag flips it live, once a human owner signs off on an accuracy bar.
+
+The AI has to earn the right to auto-approve. That's a rollout decision, not a technical one, and it's the part I'd defend hardest.
+
+### Inference over data entry
+
+The intake form asks only what the submitter actually knows: region, funnel stage, whether it's partnership content. Asset type, client vertical, service line and the catalog summary are inferred by the model. Four fields moved from manual entry to inference — the form got shorter and the record got richer.
+
+---
+
+## Build log — what broke, and what it taught me
+
+Kept because the failures are more instructive than the finished canvas.
+
+**The spec assumed an API that doesn't exist.** The original design had the orchestration layer submitting an Asana intake form via API so the board's existing rules would fire. Asana's API can't submit forms. Tasks created via `POST /tasks` never trigger rules watching for "form submitted," so they landed on the board and sat there, unassigned. Not a bug in the build — a false assumption in the spec, found by building. *Integration specs describe what the UI can do, not what the API can do.*
+
+**The classifier conflated two questions.** First working version bounced a co-branded client reel back to the submitter — and its own rationale gave it away: it said the asset needed usage-rights documentation and talent clearances. Those aren't defects, they're reasons a *reviewer* needs to see it. The effect was that the highest-stakes content was the least likely to reach a human. Fixed by splitting the outputs and adding the controlled-vocabulary guard above. *When a model's output drives routing, validate it against a schema you control — a plausible wrong answer is the expensive kind.*
+
+**Approved By was reading the wrong person.** It looked up whoever triggered the webhook. The reviewer of record is the task's *assignee*. Switching to assignee removed an API call, removed a credential dependency, and produced a better default: no assignee means no human reviewed it, which is exactly when "AI (Auto)" is the truthful value.
+
+**A lookup that finds nothing fails silently.** When the record search returns zero rows, downstream nodes simply don't run — no error, no alert, just an approval that never syncs. In production that branch needs to do something visible. Known gap, deliberately documented rather than quietly left.
+
+**Box requires HTTPS OAuth redirects.** A localhost callback can't be registered, and the workaround — tunneling so the redirect is HTTPS — regenerates its URL on every restart, meaning re-registering the app each time. Not worth it for the least interesting node in the graph, so file storage is stubbed. Knowing why an integration is hard and choosing not to fight it is a decision, not an omission.
+
+**Schema mismatches are silent until they aren't.** Airtable field names are case-sensitive, the API reports exactly one unknown field per request, and letting `typecast` invent select options on write leaves the schema undefined until data happens to arrive — which means validation can't help you and nobody can read the intended vocabulary off the table. Declaring the controlled vocabulary up front is the same instinct as the flag list in the classifier.
+
+---
+
+## Running it
+
+```bash
+npx n8n           # http://localhost:5678
+```
+
+Import a workflow via the canvas menu → **Import from File**.
+
+The lead flow runs with **no credentials at all** — it's the decision layer and deliberately sends nothing:
 
 ```bash
 curl -X POST http://localhost:5678/webhook-test/lead-capture \
@@ -45,23 +119,18 @@ curl -X POST http://localhost:5678/webhook-test/lead-capture \
   -d @examples/01-enterprise-demo-request.json
 ```
 
-The four examples cover the paths worth checking:
+The approval engine needs an Anthropic API key at minimum. Asana, Airtable and Slack are optional — stub them and the classification path still runs end to end.
 
-| File | What it exercises |
-|---|---|
-| `01-enterprise-demo-request.json` | High-value event qualifies at 12 minutes; routes to BDR |
-| `02-mid-market-threshold.json` | 118 minutes crosses the threshold; routes to ISR |
-| `03-event-below-threshold.json` | 20 minutes; nurture, 80 minutes short |
-| `04-named-account-existing-owner.json` | Existing owner beats a 90-person headcount |
+Note `/webhook-test/` only listens while the editor is armed; `/webhook/` requires the workflow to be active.
 
-Example 01 also has a deliberately messy email (` Dana@BigCo.com `) to show normalization doing its job.
+---
 
-## What is deliberately not here
+## Scope and honesty
 
-`Build Sales Handoff` constructs the Slack and SalesLoft payloads but doesn't send them. That keeps the repo runnable by anyone with no credentials to set up, and it keeps the reviewable part — the decision layer — in focus. To make it live, replace that node with two HTTP Request nodes pointed at a Slack incoming webhook and the SalesLoft API.
+These are reference implementations, not products. The lead flow doesn't send anything — it returns the decision, because the decision layer is the part worth reviewing. The approval engine's file-storage and some notification steps are stubbed, and labeled as such on the canvas.
 
-Also out of scope: enrichment, dedupe against an existing CRM, and the rolling three-month engagement calculation, which in production is a HubSpot property rather than something computed here. Each is a real part of the system and each would obscure the part this repo is meant to show.
+The classifier evaluates asset *metadata* — title, description, filename — not extracted file contents. A v2 would pull text out of the staged file and put it in the prompt.
 
-## License
+The architectures ran in production. This is them rebuilt in n8n, in a personal sandbox, with no company data.
 
-MIT
+MIT.

@@ -1,0 +1,1166 @@
+{
+  "name": "Brand Custodian — AI Content Approval Engine (Purple Panda sandbox v6)",
+  "nodes": [
+    {
+      "id": "content-intake-form",
+      "name": "Content Intake Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        304
+      ],
+      "parameters": {
+        "formTitle": "Marketing Content Intake — Brand Review",
+        "formDescription": "Submit an asset for the AI brand check + approval routing. Every submission creates an Asana task. Asset type, client vertical, service line and summary are inferred by the AI - you don't hand-enter them.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Name of submitter",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email Address",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Asset Title",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Date needed by",
+              "fieldType": "date"
+            },
+            {
+              "fieldLabel": "Asset description",
+              "fieldType": "textarea",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Region",
+              "fieldType": "dropdown",
+              "multiselect": true,
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Austin"
+                  },
+                  {
+                    "option": "San Antonio"
+                  },
+                  {
+                    "option": "Texas Statewide"
+                  },
+                  {
+                    "option": "National"
+                  },
+                  {
+                    "option": "Remote / Virtual"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Funnel Stage",
+              "fieldType": "dropdown",
+              "multiselect": true,
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "TOFU"
+                  },
+                  {
+                    "option": "MOFU"
+                  },
+                  {
+                    "option": "BOFU"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Partnership Content",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "No"
+                  },
+                  {
+                    "option": "Yes"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Asset File",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "webhookId": "brand-intake-form"
+    },
+    {
+      "id": "config",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        304
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "shadowMode",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "a2",
+              "name": "asanaProjectGid",
+              "value": "1217024951882036",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "reviewTypeFieldGid",
+              "value": "1217024951882044",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "rtAutoApproveGid",
+              "value": "1217024951882047",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "rtTierOneGid",
+              "value": "1217024951882045",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "rtTierTwoGid",
+              "value": "1217024951882046",
+              "type": "string"
+            },
+            {
+              "id": "a7",
+              "name": "approvalStageFieldGid",
+              "value": "1217024951882049",
+              "type": "string"
+            },
+            {
+              "id": "a8",
+              "name": "asReadyForReviewGid",
+              "value": "1217024951882055",
+              "type": "string"
+            },
+            {
+              "id": "a9",
+              "name": "asApprovedGid",
+              "value": "1217024951882050",
+              "type": "string"
+            },
+            {
+              "id": "a10",
+              "name": "boxApprovedRootFolderId",
+              "value": "unused-box-is-stubbed",
+              "type": "string"
+            },
+            {
+              "id": "a11",
+              "name": "airtableBaseId",
+              "value": "app63cxdW1e6xweZj",
+              "type": "string"
+            },
+            {
+              "id": "a12",
+              "name": "airtableTableId",
+              "value": "tblRPzbOg0iJ8oARV",
+              "type": "string"
+            },
+            {
+              "id": "a13",
+              "name": "slackReviewChannel",
+              "value": "content-approvals",
+              "type": "string"
+            },
+            {
+              "id": "a14",
+              "name": "brandSystemPrompt",
+              "value": "You are the Brand Custodian AI for Purple Panda Productions, a creative and media production agency (video, photography, brand identity, event coverage). You evaluate submitted marketing assets against the Messaging & Brand Governance SOP, classify them for approval routing, and enrich them with taxonomy metadata so submitters don't have to hand-enter it.\n\n=== TWO INDEPENDENT DECISIONS - DO NOT CONFLATE THEM ===\n\nDECISION 1 - brand_pass: Is there a DEFECT IN THE ASSET ITSELF that the submitter must fix before anyone reviews it?\n  brand_pass = false means: send this back to the submitter. Only set false when the asset as submitted contains an actual violation the submitter can correct.\n  brand_pass = true means: the asset is fit to enter review. This is the DEFAULT.\n\nCRITICAL: needing approval, sign-off, documentation, usage rights, talent clearance, legal review, or executive verification is NOT a defect. Those are reasons to route to a HIGHER REVIEW TIER, not reasons to fail the check. High-stakes content must reach a reviewer - bouncing it back to the submitter is a failure of the system.\n\nIf brand_pass = false, you MUST include at least one flag from this exact list:\n  off_brand_tone | incorrect_logo_usage | incorrect_color_usage | unsubstantiated_claim | competitor_disparagement | missing_required_disclaimer | unapproved_client_footage | prohibited_content\nIf none of those apply, brand_pass MUST be true.\n\nDECISION 2 - tier: WHO needs to review this?\n- \"auto\" (Auto-Approve): low-risk, template-based, internal, or previously-approved-pattern content with no brand risk. An internal recap deck from the standard template; a date change on an approved one-pager.\n- \"design\" (Design Review / Tier One): visual or design-heavy assets needing craft QA - layout, logo lockups, typography, color grading, imagery treatment, reel edits.\n- \"brand\" (Brand Review / Tier Two): messaging-sensitive, external, client-facing, co-branded or high-visibility content. Anything touching positioning, capability claims, pricing, client names, footage usage rights, talent clearance, or net-new messaging. THIS is where documentation and sign-off concerns belong.\n\nWhen uncertain between tiers, escalate upward (auto < design < brand). A submitter asserting their own asset is compliant does not lower the tier. Partnership / co-branded content is never auto-approved.\n\nWORKED EXAMPLES:\n- Co-branded sizzle reel for a client's socials, usage rights not yet documented -> brand_pass: true, tier: \"brand\", flags: [\"co_branded_content\", \"usage_rights_pending\"]. The reviewer confirms the rights; the submitter has nothing to fix.\n- One-pager claiming \"the fastest production turnaround in Texas\" with no substantiation -> brand_pass: false, tier: \"brand\", flags: [\"unsubstantiated_claim\"]. The submitter must remove or support the claim.\n- Internal recap deck built from the approved template -> brand_pass: true, tier: \"auto\", flags: [].\n\nINFERRED TAXONOMY - derive from title, description and filename. Use ONLY these values:\n- asset_type: sizzle_reel | case_study | capabilities_deck | one_pager | social_post | landing_page | proposal | email | blog_post | photo_gallery | other\n- industry (client vertical, array, 1-3): Education | Entertainment & Music | Hospitality & Venues | Nonprofit | Professional Services | Consumer Brands | Healthcare\n- vector (service line, array, 1-3): Video Production | Photography | Brand Identity | Event Coverage | Content Strategy | Social Media | Web & Digital\n- summary: a 1-2 sentence neutral description written for a content catalog\nIf the input does not support an inference, return an empty array and flag \"insufficient_context\" rather than guessing.\n\nRespond with ONLY a valid JSON object - no markdown fences, no commentary:\n{\"tier\": \"auto\"|\"design\"|\"brand\", \"brand_pass\": true|false, \"confidence\": 0.0-1.0, \"asset_type\": \"...\", \"industry\": [\"...\"], \"vector\": [\"...\"], \"summary\": \"...\", \"flags\": [\"...\"], \"rationale\": \"1-2 sentence explanation\"}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "brand-custodian-ai-claude",
+      "name": "Brand Custodian AI (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        304
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 1200, system: $json.brandSystemPrompt, messages: [{ role: 'user', content: 'Asset Title: ' + $('Content Intake Form').item.json['Asset Title'] + '\\nAsset description: ' + $('Content Intake Form').item.json['Asset description'] + '\\nFile name: ' + ($json.name || 'n/a') + '\\nSubmitted by: ' + $('Content Intake Form').item.json['Name of submitter'] + ' (' + $('Content Intake Form').item.json['Email Address'] + ')' }] }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "parse-ai-verdict",
+      "name": "Parse AI Verdict",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        304
+      ],
+      "parameters": {
+        "jsCode": "const cfg  = $('Config').item.json;\nconst form = $('Content Intake Form').item.json;\n\nconst raw = (Array.isArray($json.content) && $json.content[0] && $json.content[0].text)\n  ? $json.content[0].text : '';\n\nlet v;\ntry {\n  v = JSON.parse(raw.replace(/```json|```/g, '').trim());\n} catch (e) {\n  // Fail safe: an unparseable model response escalates to full human review.\n  v = { tier: 'brand', brand_pass: true, confidence: 0, asset_type: 'unknown',\n        industry: [], vector: [], summary: '', flags: ['ai_parse_error'],\n        rationale: 'Could not parse AI output - defaulted to Brand Review. Raw: ' + String(raw).slice(0, 300) };\n}\n\nconst tierMap = { 'auto':'auto', 'auto-approve':'auto', 'design':'design', 'design review':'design',\n  'tier one':'design', 'brand':'brand', 'brand review':'brand', 'tier two':'brand' };\nlet tier = tierMap[String(v.tier || '').toLowerCase()] || 'brand';\n\nconst arr = (x) => Array.isArray(x) ? x\n  : (typeof x === 'string' && x.trim()) ? x.split(',').map(s => s.trim()) : [];\n\nconst flags = arr(v.flags);\nlet brand_pass = v.brand_pass !== false;\n\n// --- Guard 1: validate the failure against a controlled vocabulary. -------------\n// A model can report \"needs legal sign-off\" as a failed brand check, which would\n// bounce high-stakes work back to the submitter instead of routing it to a\n// reviewer. A rejection is only honoured if it cites an actual asset defect.\nconst VIOLATIONS = ['off_brand_tone','incorrect_logo_usage','incorrect_color_usage',\n  'unsubstantiated_claim','competitor_disparagement','missing_required_disclaimer',\n  'unapproved_client_footage','prohibited_content'];\n\nif (!brand_pass && !flags.some(f => VIOLATIONS.includes(f))) {\n  brand_pass = true;                 // no citable defect -> not a rejection\n  tier = 'brand';                    // but the concern is real, so escalate\n  flags.push('escalated_not_failed');\n}\n\n// --- Guard 2: co-branded work never auto-approves, regardless of model output. ---\nconst partnership = String(form['Partnership Content'] || 'No') === 'Yes';\nif (partnership && tier === 'auto') {\n  tier = 'brand';\n  flags.push('partnership_override');\n}\n\nif (flags.includes('ai_parse_error')) brand_pass = true;\n\nconst out = { ...cfg };\ndelete out.brandSystemPrompt;\n\nObject.assign(out, {\n  // --- submitter input: only what the requestor actually knows ---\n  submitterName:      form['Name of submitter'],\n  submitterEmail:     form['Email Address'],\n  assetTitle:         form['Asset Title'],\n  assetDescription:   form['Asset description'],\n  dateNeeded:         form['Date needed by'] || null,\n  region:             arr(form['Region']),\n  funnelStage:        arr(form['Funnel Stage']),\n  partnershipContent: partnership,\n\n  // --- AI inference: taxonomy the submitter no longer hand-enters ---\n  tier:       tier,\n  brand_pass: brand_pass,\n  confidence: typeof v.confidence === 'number' ? v.confidence : 0,\n  asset_type: v.asset_type || 'unknown',\n  industry:   arr(v.industry),\n  vector:     arr(v.vector),\n  summary:    v.summary || form['Asset description'],\n  flags:      flags,\n  rationale:  v.rationale || ''\n});\nreturn [{ json: out }];"
+      }
+    },
+    {
+      "id": "brand-check-passed",
+      "name": "Brand Check Passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        304
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.brand_pass }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "build-asana-payload",
+      "name": "Build Asana Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        128
+      ],
+      "parameters": {
+        "jsCode": "const d = $json;\nconst tierCfg = {\n  auto:   { rt: d.rtAutoApproveGid, label: 'Auto-Approve' },\n  design: { rt: d.rtTierOneGid,     label: 'Design Review' },\n  brand:  { rt: d.rtTierTwoGid,     label: 'Brand Review' },\n}[d.tier];\nconst autoResolve = d.tier === 'auto' && d.shadowMode !== true;\nconst custom_fields = {};\ncustom_fields[d.reviewTypeFieldGid] = tierCfg.rt;\ncustom_fields[d.approvalStageFieldGid] = autoResolve ? d.asApprovedGid : d.asReadyForReviewGid;\nconst notes = [\n  'Submitted by: ' + d.submitterName + ' (' + d.submitterEmail + ')',\n  'Asset description: ' + d.assetDescription,\n  'Submitted - region: ' + (d.region.join(', ') || 'n/a') + ' | funnel: ' + (d.funnelStage.join(', ') || 'n/a') + ' | partnership: ' + (d.partnershipContent ? 'Yes' : 'No'),\n  '',\n  '— Brand Custodian AI —',\n  'Tier: ' + tierCfg.label,\n  'Confidence: ' + d.confidence,\n  'Flags: ' + (d.flags.length ? d.flags.join(', ') : 'none'),\n  'Inferred - type: ' + d.asset_type + ' | vertical: ' + (d.industry.join(', ') || 'n/a') + ' | service line: ' + (d.vector.join(', ') || 'n/a'),\n  d.rationale ? 'Rationale: ' + d.rationale : '',\n  '',\n  'File: stored in Box staging (stubbed in this sandbox).',\n].filter(l => l !== null).join('\\n');\nconst payload = { data: {\n  name: d.assetTitle,\n  notes: notes,\n  projects: [d.asanaProjectGid],\n  custom_fields: custom_fields,\n} };\nif (d.dateNeeded) payload.data.due_on = String(d.dateNeeded).slice(0, 10);\nreturn [{ json: { ...d,\n  tierLabel: tierCfg.label,\n  autoResolve: autoResolve,\n  initialStatus: autoResolve ? 'Approved' : 'Pending',\n  needsShadowPing: d.tier === 'auto' && d.shadowMode === true,\n  asanaPayload: payload } }];"
+      }
+    },
+    {
+      "id": "create-asana-task",
+      "name": "Create Asana Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1568,
+        128
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://app.asana.com/api/1.0/tasks",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "asanaApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.asanaPayload) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "log-to-airtable-pending",
+      "name": "Log to Airtable (Pending)",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1792,
+        128
+      ],
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "={{ $('Config').item.json.airtableBaseId }}",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "={{ $('Config').item.json.airtableTableId }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Build Asana Payload').item.json.assetTitle }}",
+            "Summary": "={{ $('Build Asana Payload').item.json.summary }}",
+            "Asset Type": "={{ $('Build Asana Payload').item.json.asset_type }}",
+            "Approval Tier": "={{ $('Build Asana Payload').item.json.tierLabel }}",
+            "Approval Status": "={{ $('Build Asana Payload').item.json.initialStatus }}",
+            "AI Confidence Score": "={{ $('Build Asana Payload').item.json.confidence }}",
+            "AI Flags": "={{ $('Build Asana Payload').item.json.flags.join(', ') }}",
+            "Asana Task Link": "={{ $json.data.permalink_url }}",
+            "Region": "={{ $('Build Asana Payload').item.json.region }}",
+            "Industry": "={{ $('Build Asana Payload').item.json.industry }}",
+            "Vector": "={{ $('Build Asana Payload').item.json.vector }}",
+            "Funnel Stage": "={{ $('Build Asana Payload').item.json.funnelStage }}",
+            "Partnership Content": "={{ $('Build Asana Payload').item.json.partnershipContent }}",
+            "Upload Date": "={{ $now.toFormat('yyyy-MM-dd') }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "typecast": true
+        }
+      }
+    },
+    {
+      "id": "shadow-ping-needed",
+      "name": "Shadow Ping Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        128
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Build Asana Payload').item.json.needsShadowPing }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "asana-approval-webhook",
+      "name": "Asana Approval Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1008
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "asana-brand-approval",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "asana-brand-approval"
+    },
+    {
+      "id": "handshake",
+      "name": "Handshake?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        224,
+        1008
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.headers['x-hook-secret'] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "respond-handshake",
+      "name": "Respond: Handshake",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        880
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "X-Hook-Secret",
+                "value": "={{ $json.headers['x-hook-secret'] }}"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "respond-200-ok",
+      "name": "Respond: 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        1136
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      }
+    },
+    {
+      "id": "config-approval-flow",
+      "name": "Config (Approval Flow)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        672,
+        1136
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "asanaProjectGid",
+              "value": "1217024951882036",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "reviewTypeFieldGid",
+              "value": "1217024951882044",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "rtAutoApproveGid",
+              "value": "1217024951882047",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "rtTierOneGid",
+              "value": "1217024951882045",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "rtTierTwoGid",
+              "value": "1217024951882046",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "approvalStageFieldGid",
+              "value": "1217024951882049",
+              "type": "string"
+            },
+            {
+              "id": "a7",
+              "name": "asReadyForReviewGid",
+              "value": "1217024951882055",
+              "type": "string"
+            },
+            {
+              "id": "a8",
+              "name": "asApprovedGid",
+              "value": "1217024951882050",
+              "type": "string"
+            },
+            {
+              "id": "a9",
+              "name": "boxApprovedRootFolderId",
+              "value": "unused-box-is-stubbed",
+              "type": "string"
+            },
+            {
+              "id": "a10",
+              "name": "airtableBaseId",
+              "value": "app63cxdW1e6xweZj",
+              "type": "string"
+            },
+            {
+              "id": "a11",
+              "name": "airtableTableId",
+              "value": "tblRPzbOg0iJ8oARV",
+              "type": "string"
+            },
+            {
+              "id": "a12",
+              "name": "slackReviewChannel",
+              "value": "content-approvals",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "extract-task-events",
+      "name": "Extract Task Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        1136
+      ],
+      "parameters": {
+        "jsCode": "const cfg = $json;\nconst events = (cfg.body && cfg.body.events) ? cfg.body.events : [];\nconst keep = ['approvalStageFieldGid', 'boxApprovedRootFolderId', 'airtableBaseId', 'airtableTableId'];\nconst cfgOut = {};\nfor (const k of keep) cfgOut[k] = cfg[k];\nconst seen = new Set();\nconst out = [];\nfor (const e of events) {\n  if (e.resource && e.resource.resource_type === 'task' && e.action === 'changed') {\n    const gid = e.resource.gid;\n    if (!seen.has(gid)) {\n      seen.add(gid);\n      out.push({ json: { taskGid: gid, actorGid: (e.user && e.user.gid) || '', ...cfgOut } });\n    }\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "get-asana-task",
+      "name": "Get Asana Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        1136
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://app.asana.com/api/1.0/tasks/{{ $json.taskGid }}?opt_fields=name,permalink_url,assignee.name,custom_fields.gid,custom_fields.name,custom_fields.display_value",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "asanaApi",
+        "options": {}
+      }
+    },
+    {
+      "id": "read-approval-stage",
+      "name": "Read Approval Stage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        1136
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prev = $('Extract Task Events').item.json;\nconst t = $json.data || {};\n\nlet f = null;\nif (Array.isArray(t.custom_fields)) {\n  f = t.custom_fields.find(x => x.gid === prev.approvalStageFieldGid)\n   || t.custom_fields.find(x => x.name === 'Approval Stage');\n}\n\n// The reviewer of record is the task's assignee - the person who owned the\n// review - not whoever happened to trigger the webhook. No assignee means no\n// human reviewed it, which is exactly when 'AI (Auto)' is the honest answer.\nconst assigneeName = (t.assignee && t.assignee.name) ? t.assignee.name : 'AI (Auto)';\n\nreturn { json: { ...prev,\n  taskName: t.name || '',\n  taskUrl:  t.permalink_url || '',\n  stage:    (f && f.display_value) || '',\n  assigneeName } };"
+      }
+    },
+    {
+      "id": "find-airtable-record",
+      "name": "Find Airtable Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1568,
+        1136
+      ],
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "={{ $json.airtableBaseId }}",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "={{ $json.airtableTableId }}",
+          "mode": "id"
+        },
+        "filterByFormula": "=SEARCH(\"{{ $json.taskGid }}\", {Asana Task Link})",
+        "returnAll": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "status-changed",
+      "name": "Status Changed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        1136
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json['Approval Status'] || '' }}",
+              "rightValue": "={{ $('Read Approval Stage').item.json.stage }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stage-router",
+      "name": "Stage Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        2016,
+        1136
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "id": "r1",
+                    "leftValue": "={{ $('Read Approval Stage').item.json.stage }}",
+                    "rightValue": "Approved",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Approved"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      }
+    },
+    {
+      "id": "update-airtable-approved",
+      "name": "Update Airtable (Approved)",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        3808,
+        1008
+      ],
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "={{ $('Read Approval Stage').item.json.airtableBaseId }}",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "={{ $('Read Approval Stage').item.json.airtableTableId }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Find Airtable Record').item.json.id }}",
+            "Approval Status": "Approved",
+            "Approved By": "={{ $('Read Approval Stage').item.json.assigneeName }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": []
+        },
+        "options": {
+          "typecast": true
+        }
+      }
+    },
+    {
+      "id": "update-airtable-status-only",
+      "name": "Update Airtable (Status Only)",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        2240,
+        1264
+      ],
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "={{ $('Read Approval Stage').item.json.airtableBaseId }}",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "={{ $('Read Approval Stage').item.json.airtableTableId }}",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Find Airtable Record').item.json.id }}",
+            "Approval Status": "={{ $('Read Approval Stage').item.json.stage }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": []
+        },
+        "options": {
+          "typecast": true
+        }
+      }
+    },
+    {
+      "id": "box-upload-to-staging-stubbed",
+      "name": "Box: upload to staging (stubbed)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        224,
+        304
+      ],
+      "parameters": {},
+      "notes": "Production: uploads the submitted file to the Box staging folder and returns the file ID used downstream.",
+      "notesInFlow": true
+    },
+    {
+      "id": "box-move-to--ai-approved-{tier}-{yyyy-mm}-+-shared-link-stubbed",
+      "name": "Box: move to /AI-Approved/{tier}/{YYYY-MM} + shared link (stubbed)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2240,
+        1008
+      ],
+      "parameters": {},
+      "notes": "Production: creates tier/month folders idempotently (409-conflict parsing), moves the approved file, generates a company shared link.",
+      "notesInFlow": true
+    },
+    {
+      "id": "find-submitter-on-slack",
+      "name": "Find Submitter on Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        496
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "=https://slack.com/api/users.lookupByEmail?email={{ $json.submitterEmail }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "options": {}
+      }
+    },
+    {
+      "id": "return-to-submitter-slack-dm",
+      "name": "Return to Submitter (Slack DM)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1568,
+        496
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $json.user && $json.user.id ? $json.user.id : $('Config').item.json.slackReviewChannel }}",
+          "mode": "id"
+        },
+        "text": "=🚫 *Brand check — needs another pass:* “{{ $('Parse AI Verdict').item.json.assetTitle }}”\n\nFlags: {{ $('Parse AI Verdict').item.json.flags.join(', ') || 'none listed' }}\n{{ $('Parse AI Verdict').item.json.rationale }}\n\nPlease revise and resubmit via the intake form.",
+        "otherOptions": {}
+      }
+    },
+    {
+      "id": "slack-shadow-confirm-ping",
+      "name": "Slack: Shadow Confirm Ping",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        2240,
+        32
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $('Config').item.json.slackReviewChannel }}",
+          "mode": "name"
+        },
+        "text": "=🤖 *Shadow mode — confirm auto-approve:* Brand Custodian recommends *AUTO-APPROVE* for “{{ $('Build Asana Payload').item.json.assetTitle }}” (confidence {{ $('Build Asana Payload').item.json.confidence }}).\nPlease confirm or flag in Asana: {{ $('Create Asana Task').item.json.data.permalink_url }}",
+        "otherOptions": {}
+      }
+    }
+  ],
+  "connections": {
+    "Content Intake Form": {
+      "main": [
+        [
+          {
+            "node": "Box: upload to staging (stubbed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Brand Custodian AI (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brand Custodian AI (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Verdict": {
+      "main": [
+        [
+          {
+            "node": "Brand Check Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brand Check Passed?": {
+      "main": [
+        [
+          {
+            "node": "Build Asana Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Find Submitter on Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Asana Payload": {
+      "main": [
+        [
+          {
+            "node": "Create Asana Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Asana Task": {
+      "main": [
+        [
+          {
+            "node": "Log to Airtable (Pending)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Airtable (Pending)": {
+      "main": [
+        [
+          {
+            "node": "Shadow Ping Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shadow Ping Needed?": {
+      "main": [
+        [
+          {
+            "node": "Slack: Shadow Confirm Ping",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Asana Approval Webhook": {
+      "main": [
+        [
+          {
+            "node": "Handshake?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handshake?": {
+      "main": [
+        [
+          {
+            "node": "Respond: Handshake",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond: 200 OK": {
+      "main": [
+        [
+          {
+            "node": "Config (Approval Flow)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config (Approval Flow)": {
+      "main": [
+        [
+          {
+            "node": "Extract Task Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Task Events": {
+      "main": [
+        [
+          {
+            "node": "Get Asana Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Asana Task": {
+      "main": [
+        [
+          {
+            "node": "Read Approval Stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Approval Stage": {
+      "main": [
+        [
+          {
+            "node": "Find Airtable Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Airtable Record": {
+      "main": [
+        [
+          {
+            "node": "Status Changed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status Changed?": {
+      "main": [
+        [
+          {
+            "node": "Stage Router",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Stage Router": {
+      "main": [
+        [
+          {
+            "node": "Box: move to /AI-Approved/{tier}/{YYYY-MM} + shared link (stubbed)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Airtable (Status Only)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Box: upload to staging (stubbed)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Box: move to /AI-Approved/{tier}/{YYYY-MM} + shared link (stubbed)": {
+      "main": [
+        [
+          {
+            "node": "Update Airtable (Approved)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Submitter on Slack": {
+      "main": [
+        [
+          {
+            "node": "Return to Submitter (Slack DM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
