@@ -12,7 +12,7 @@ The interesting part isn't the tooling. It's where the logic lives, what the AI 
 ```
 workflows/
   lead-capture-qualify-route.json        7 nodes  · lead lifecycle decision layer
-  brand-custodian-approval-engine.json  28 nodes · AI content approval, two flows
+  brand-custodian-approval-engine.json  27 nodes · AI content approval, two flows
 prompts/
   brand-custodian-system-prompt.md       the classifier's contract, versioned
 examples/
